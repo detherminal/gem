@@ -1,0 +1,16 @@
+[package]
+name = "gem"
+version = "0.1.0"
+authors = ["detherminal"]
+edition = "2021"
+description = "Program to generate Monero paperwallets for gifts"
+readme = "README.md"
+repository = "https://github.com/detherminal/gem"
+license = "MIT"
+license-file = "LICENSE.md"
+keywords = ["monero"]
+categories = ["monero", "paperwallet", "gift"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
