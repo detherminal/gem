@@ -7,10 +7,23 @@ description = "Program to generate Monero paperwallets for gifts"
 readme = "README.md"
 repository = "https://github.com/detherminal/gem"
 license = "MIT"
-license-file = "LICENSE.md"
 keywords = ["monero"]
 categories = ["monero", "paperwallet", "gift"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+eframe = "0.25.0"
+egui = "0.25.0"
+libmonero = "0.1.7"
+image = { version = "0.24", default-features = true, features = [
+  "png"
+]}
+egui_extras = {version = "0.25.0", features = ["all_loaders", "chrono"]}
+imageproc = "0.23.0"
+rusttype = "0.9.3"
+qrcode = "0.13.0"
+chrono = "0.4.33"
+serde_json = "1.0.111"
+ureq = {version = "2.9.1", features = ["json"]}
+clipboard = "0.5.0"
