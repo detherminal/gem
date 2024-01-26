@@ -1,5 +1,5 @@
 [package]
-name = "gem"
+name = "gem-paper-wallet"
 version = "0.1.0"
 authors = ["detherminal"]
 edition = "2021"
@@ -16,7 +16,7 @@ categories = ["monero", "paperwallet", "gift"]
 eframe = "0.25.0"
 egui = "0.25.0"
 libmonero = "0.1.7"
-image = { version = "0.24", default-features = true, features = [
+image = { version = "0.24", default-features = false, features = [
   "png"
 ]}
 egui_extras = {version = "0.25.0", features = ["all_loaders", "chrono"]}
