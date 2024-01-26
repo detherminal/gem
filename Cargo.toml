@@ -17,7 +17,8 @@ eframe = "0.25.0"
 egui = "0.25.0"
 libmonero = "0.1.7"
 image = { version = "0.24", default-features = false, features = [
-  "png"
+  "png",
+  "jpeg",
 ]}
 egui_extras = {version = "0.25.0", features = ["all_loaders", "chrono"]}
 imageproc = "0.23.0"

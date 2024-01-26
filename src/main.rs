@@ -165,6 +165,8 @@ impl eframe::App for GemApp {
             auto_fill(self, true);
             self.booted = true;
         }
+        // Change background color
+        ctx.set_visuals(egui::Visuals::dark());
         egui::CentralPanel::default().show(ctx, |ui| {
             let font = Asset::get("MoneroGothic_v3.otf").unwrap();
             let font_bytes = font.data.to_vec();
@@ -623,7 +625,7 @@ impl eframe::App for GemApp {
                     }
                     if ui.button("Save This Image").clicked() {
                         let date = chrono::Local::now();
-                        let date = date.format("%H:%M-%d-%m-%Y").to_string();
+                        let date = date.format("%d-%m-%Y-%H-%M").to_string();
                         let files = FileDialog::new()
                             .add_filter("jpg", &["jpg"])
                             .set_title("Save Image")
