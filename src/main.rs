@@ -1,6 +1,3 @@
-use std::ops::Div;
-use std::thread;
-
 use chrono::NaiveDate;
 use clipboard::ClipboardProvider;
 use eframe::egui;
@@ -9,8 +6,15 @@ use image::{EncodableLayout, GenericImage, GenericImageView, Luma, Rgba};
 use imageproc::drawing::{draw_line_segment_mut, draw_text_mut};
 use libmonero::{derive_hex_seed, derive_priv_keys, derive_pub_key, generate_seed};
 use qrcode::QrCode;
+use rfd::FileDialog;
+use rust_embed::RustEmbed;
 use rusttype::{Font, Scale};
 use serde_json::json;
+use std::ops::Div;
+
+#[derive(RustEmbed)]
+#[folder = "./embed/"]
+struct Asset;
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
@@ -42,9 +46,11 @@ struct GemApp {
     auto_wallet: bool,
     block_height: u64,
     date: NaiveDate,
-    gifter: String,
+    from: String,
+    to: String,
     contact: String,
     booted: bool,
+    img: DynamicImage,
 }
 
 impl Default for GemApp {
@@ -63,13 +69,15 @@ impl Default for GemApp {
             block_height: 3000000,
             date: NaiveDate::parse_from_str(date.as_str(), "%d/%m/%Y").unwrap(),
             booted: false,
-            gifter: "".to_string(),
+            from: "".to_string(),
+            to: "".to_string(),
             contact: "".to_string(),
+            img: DynamicImage::new_rgb8(1, 1),
         }
     }
 }
 
-fn auto_fill(self_app: &mut GemApp) {
+fn auto_fill(self_app: &mut GemApp, first: bool) {
     // Get block height via ureq
     let url = "http://xmr-node.cakewallet.com:18081/json_rpc";
     let resp = ureq::post(url)
@@ -78,64 +86,105 @@ fn auto_fill(self_app: &mut GemApp) {
             "jsonrpc": "2.0",
             "id": "0",
             "method": "get_block_count"
-        }))
-        .unwrap();
-    let resp = resp.into_string().unwrap();
-    let resp: serde_json::Value = serde_json::from_str(resp.as_str()).unwrap();
-    let block_height = resp["result"]["count"].as_u64().unwrap();
-    self_app.block_height = block_height - 1000;
+        }));
+    // Check result
+    match resp {
+        Ok(resp) => {
+            let resp = resp.into_string().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(resp.as_str()).unwrap();
+            let block_height = resp["result"]["count"].as_u64().unwrap();
+            self_app.block_height = block_height - 1000;
+        }
+        Err(_) => {
+            return ();
+        }
+    }
     // Get price via coingecko
     let url = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd";
-    let resp = ureq::get(url).call().unwrap();
-    let resp = resp.into_string().unwrap();
-    let resp: serde_json::Value = serde_json::from_str(resp.as_str()).unwrap();
-    let price = resp["monero"]["usd"].as_f64().unwrap();
-    self_app.value_xmr = price as f32;
+    let resp = ureq::get(url).call();
+    match resp {
+        Ok(resp) => {
+            let resp = resp.into_string().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(resp.as_str()).unwrap();
+            let price = resp["monero"]["usd"].as_f64().unwrap();
+            self_app.value_xmr = price as f32;
+        }
+        Err(_) => {
+            return ();
+        }
+    };
     // Get date
     let date = chrono::Local::now();
     let date = date.format("%d/%m/%Y").to_string();
     self_app.date = NaiveDate::parse_from_str(date.as_str(), "%d/%m/%Y").unwrap();
     // Generate wallet
-    let mnemonic = generate_seed("en", "original");
-    let priv_keys = derive_priv_keys(derive_hex_seed(mnemonic.clone()));
-    let priv_sk = priv_keys[0].to_string();
-    let priv_vk = priv_keys[1].to_string();
-    let pub_sk = derive_pub_key(priv_sk);
-    let pub_vk = derive_pub_key(priv_vk);
-    let address = libmonero::derive_address(pub_sk, pub_vk, 0);
-    self_app.address = address.clone();
-    self_app.mnemonic = mnemonic.join(" ");
-    let mne_str_encoded = mnemonic.join("%20");
-    let qr_code = QrCode::new(format!(
-        "monero_wallet:{}?seed={}",
-        address, mne_str_encoded
-    ))
-    .unwrap();
-    let qr_img = qr_code.render::<Luma<u8>>().build();
-    let qr_img = DynamicImage::ImageLuma8(qr_img);
-    let qr_img = qr_img.resize_exact(350, 350, image::imageops::FilterType::Nearest);
-    self_app.qr_main = qr_img;
-    let qr_addr_code = QrCode::new(format!("{}", address)).unwrap();
-    let qr_addr_img = qr_addr_code.render::<Luma<u8>>().build();
-    let qr_addr_img = DynamicImage::ImageLuma8(qr_addr_img);
-    let qr_addr_img = qr_addr_img.resize_exact(150, 150, image::imageops::FilterType::Nearest);
-    self_app.qr_addr = qr_addr_img;
+    if first {
+        let mnemonic = generate_seed("en", "original");
+        let priv_keys = derive_priv_keys(derive_hex_seed(mnemonic.clone()));
+        let priv_sk = priv_keys[0].to_string();
+        let priv_vk = priv_keys[1].to_string();
+        let pub_sk = derive_pub_key(priv_sk);
+        let pub_vk = derive_pub_key(priv_vk);
+        let address = libmonero::derive_address(pub_sk, pub_vk, 0);
+        self_app.address = address.clone();
+        self_app.mnemonic = mnemonic.join(" ");
+        let mne_str_encoded = mnemonic.join("%20");
+        let qr_code = QrCode::new(format!(
+            "monero_wallet:{}?seed={}",
+            address, mne_str_encoded
+        ));
+        match qr_code {
+            Ok(qr_code) => {
+                let qr_img = qr_code.render::<Luma<u8>>().build();
+                let qr_img = DynamicImage::ImageLuma8(qr_img);
+                let qr_img = qr_img.resize_exact(350, 350, image::imageops::FilterType::Nearest);
+                self_app.qr_main = qr_img;
+            }
+            Err(_) => {
+                return ();
+            }
+        }
+        let qr_addr_code = QrCode::new(format!("{}", address));
+        match qr_addr_code {
+            Ok(qr_addr_code) => {
+                let qr_addr_img = qr_addr_code.render::<Luma<u8>>().build();
+                let qr_addr_img = DynamicImage::ImageLuma8(qr_addr_img);
+                let qr_addr_img = qr_addr_img.resize_exact(150, 150, image::imageops::FilterType::Nearest);
+                self_app.qr_addr = qr_addr_img;
+            }
+            Err(_) => {
+                return ();
+            }
+        }
+    }
 }
 
 impl eframe::App for GemApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.booted {
-            auto_fill(self);
+            auto_fill(self, true);
             self.booted = true;
         }
-        // Get date
-        let date = chrono::Local::now();
-        let date = date.format("%d/%m/%Y").to_string();
         egui::CentralPanel::default().show(ctx, |ui| {
-            let mut img = ImageReader::open("./assets/empty_card.png")
-                .unwrap()
-                .decode()
-                .unwrap();
+            let font = Asset::get("MoneroGothic_v3.otf").unwrap();
+            let font_bytes = font.data.to_vec();
+            let font = Font::try_from_vec(font_bytes).unwrap();
+            // Load image from Asset
+            let card = Asset::get("empty_card.png").unwrap();
+            let img = ImageReader::with_format(
+                card.data.as_bytes(),
+                image::ImageFormat::Png,
+            );
+            let mut img = match image::load_from_memory(img.into_inner()) {
+                Ok(img) => {
+                    let img = img.to_rgba8();
+                    let img = DynamicImage::ImageRgba8(img);
+                    img
+                }
+                Err(_) => {
+                    return ();
+                }
+            };
             let font_size = 20.0;
             let black = Rgba([0, 0, 0, 0]);
             draw_text_mut(
@@ -144,10 +193,7 @@ impl eframe::App for GemApp {
                 160,
                 65,
                 Scale { x: 60.0, y: 60.0 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "MONERO GIFT",
             );
             draw_text_mut(
@@ -159,10 +205,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 format!(
                     "Congratulations! You have been gifted {} XMR (~{:.2})",
                     self.amount,
@@ -179,10 +222,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "You can redeem this gift at any time into a Monero wallet.",
             );
             draw_text_mut(
@@ -194,10 +234,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "For example, you can use the instructions below for",
             );
             draw_text_mut(
@@ -209,10 +246,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "redeeming this gift into the Cake Wallet app:",
             );
             draw_text_mut(
@@ -224,10 +258,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "1 - Install and open the Cake Wallet app on your phone.",
             );
             draw_text_mut(
@@ -239,10 +270,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "2 - Tap the 'Restore Wallet' button.",
             );
             draw_text_mut(
@@ -254,10 +282,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "3 - Tap the 'Scan QR Code' button.",
             );
             draw_text_mut(
@@ -269,10 +294,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "4 - Scan the big QR code on the side.",
             );
             draw_text_mut(
@@ -284,10 +306,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "After importing, you can use the XMR in the wallet as you wish.",
             );
             draw_text_mut(
@@ -299,10 +318,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "Message: ",
             );
             draw_text_mut(
@@ -314,10 +330,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 format!("- {}", self.description).as_str(),
             );
             draw_text_mut(
@@ -329,10 +342,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "Contact:",
             );
             draw_text_mut(
@@ -344,10 +354,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 format!("- {}", self.contact).as_str(),
             );
             draw_text_mut(
@@ -356,10 +363,7 @@ impl eframe::App for GemApp {
                 740,
                 30,
                 Scale { x: 30.0, y: 30.0 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "WALLET",
             );
             draw_text_mut(
@@ -371,10 +375,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 "ADDRESS",
             );
             draw_text_mut(
@@ -386,10 +387,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 format!("Date: {}", self.date.format("%d/%m/%Y")).as_str(),
             );
             draw_text_mut(
@@ -401,10 +399,7 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
+                &font,
                 format!("Height: {}", self.block_height).as_str(),
             );
             draw_text_mut(
@@ -416,36 +411,34 @@ impl eframe::App for GemApp {
                     x: font_size,
                     y: font_size,
                 },
-                &Font::try_from_vec(Vec::from(
-                    include_bytes!("./../assets/MoneroGothic_v3.otf") as &[u8]
-                ))
-                .unwrap(),
-                format!("From {}", self.gifter).as_str(),
+                &font,
+                format!("From {}", self.from).as_str(),
+            );
+            draw_text_mut(
+                &mut img,
+                black,
+                800,
+                500,
+                Scale {
+                    x: font_size,
+                    y: font_size,
+                },
+                &font,
+                format!("From {}", self.from).as_str(),
+            );
+            draw_text_mut(
+                &mut img,
+                black,
+                800,
+                530,
+                Scale {
+                    x: font_size,
+                    y: font_size,
+                },
+                &font,
+                format!("To {}", self.to).as_str(),
             );
             draw_line_segment_mut(&mut img, (575.0, 0.0), (575.0, 590.0), black);
-            // ui.horizontal(|ui| {
-            //     ui.heading("Enter amount of XMR to be gifted: ");
-            //     ui.add(
-            //         egui::DragValue::new(&mut self.amount)
-            //             .speed(0.01)
-            //             .min_decimals(4).max_decimals(4)
-            //             .clamp_range(0.0..=1000000.0),
-            //     );
-            // });
-
-            // egui::Grid::new("my_grid")
-            //     .striped(true)
-            //     .spacing([10.0, 10.0])
-            //     .show(ui, |ui| {
-            //         ui.label("Enter amount of XMR to be gifted: ");
-            //         ui.add(
-            //             egui::DragValue::new(&mut self.amount)
-            //                 .speed(0.01)
-            //                 .min_decimals(4)
-            //                 .max_decimals(4)
-            //                 .clamp_range(0.0..=1000000.0),
-            //         );
-            //     });
             ui.vertical_centered(|ui| {
                 // Grid with width of entire ui
                 egui::Grid::new("my_grid")
@@ -465,13 +458,16 @@ impl eframe::App for GemApp {
                         );
                         ui.heading("Auto Fill (Might Be Slow): ");
                         if ui.checkbox(&mut self.auto_wallet, "").clicked() && self.auto_wallet {
-                            auto_fill(self);
+                            auto_fill(self, false);
                         }
                         ui.end_row();
                         ui.heading("Mnemonic: ");
                         if self.auto_wallet {
                             ui.horizontal(|ui| {
-                                ui.add(egui::TextEdit::singleline(&mut self.mnemonic).interactive(false));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.mnemonic)
+                                        .interactive(false),
+                                );
                                 if ui.button("Copy").clicked() {
                                     let mut ctx: clipboard::ClipboardContext =
                                         clipboard::ClipboardProvider::new().unwrap();
@@ -491,7 +487,10 @@ impl eframe::App for GemApp {
                         ui.heading("Address: ");
                         if self.auto_wallet {
                             ui.horizontal(|ui| {
-                                ui.add(egui::TextEdit::singleline(&mut self.address).interactive(false));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.address)
+                                        .interactive(false),
+                                );
                                 if ui.button("Copy").clicked() {
                                     let mut ctx: clipboard::ClipboardContext =
                                         clipboard::ClipboardProvider::new().unwrap();
@@ -530,7 +529,7 @@ impl eframe::App for GemApp {
                         ui.end_row();
                         ui.heading("Value Per XMR: ");
                         if self.auto_wallet {
-                            ui.label(format!("${:.2}", self.value_xmr * self.amount));
+                            ui.label(format!("${:.2}", self.value_xmr));
                         } else {
                             ui.add(
                                 egui::DragValue::new(&mut self.value_xmr)
@@ -540,75 +539,101 @@ impl eframe::App for GemApp {
                             );
                         }
                         ui.heading("Message: ");
-                        ui.add(egui::TextEdit::singleline(&mut self.description).char_limit(50));
+                        ui.add(egui::TextEdit::singleline(&mut self.description).char_limit(60));
                         ui.end_row();
-                        ui.heading("Gifter: ");
-                        ui.add(egui::TextEdit::singleline(&mut self.gifter).char_limit(15));
+                        ui.heading("From - To: ");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.from)
+                                    .char_limit(15)
+                                    .desired_width(130.0),
+                            );
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.to)
+                                    .char_limit(18)
+                                    .desired_width(150.0),
+                            );
+                        });
                         ui.heading("Contact: ");
-                        ui.add(egui::TextEdit::singleline(&mut self.contact).char_limit(50));
+                        ui.add(egui::TextEdit::singleline(&mut self.contact).char_limit(60));
                         ui.end_row();
                     });
                 ui.add_space(10.0);
-                if self.auto_wallet {
-                    if ui.button("Generate New Wallet").clicked() {
-                        // We have to do all deriving manually for now, libmonero will support generating directly a wallet soon
-                        let mnemonic = generate_seed("en", "original");
-                        let priv_keys = derive_priv_keys(derive_hex_seed(mnemonic.clone()));
-                        let priv_sk = priv_keys[0].to_string();
-                        let priv_vk = priv_keys[1].to_string();
-                        let pub_sk = derive_pub_key(priv_sk);
-                        let pub_vk = derive_pub_key(priv_vk);
-                        let address = libmonero::derive_address(pub_sk, pub_vk, 0);
-                        self.address = address.clone();
-                        self.mnemonic = mnemonic.join(" ");
-                        let mne_str_encoded = mnemonic.join("%20");
-                        let qr_code = QrCode::new(format!(
-                            "monero_wallet:{}?seed={}",
-                            address, mne_str_encoded
-                        ))
-                        .unwrap();
-                        let qr_img = qr_code.render::<Luma<u8>>().build();
-                        let qr_img = DynamicImage::ImageLuma8(qr_img);
-                        let qr_img =
-                            qr_img.resize_exact(350, 350, image::imageops::FilterType::Nearest);
-                        self.qr_main = qr_img;
-                        let qr_addr_code = QrCode::new(format!("{}", address)).unwrap();
-                        let qr_addr_img = qr_addr_code.render::<Luma<u8>>().build();
-                        let qr_addr_img = DynamicImage::ImageLuma8(qr_addr_img);
-                        let qr_addr_img = qr_addr_img.resize_exact(
-                            150,
-                            150,
-                            image::imageops::FilterType::Nearest,
-                        );
-                        self.qr_addr = qr_addr_img;
+                ui.horizontal(|ui| {
+                    ui.add_space(400.0);
+                    if self.auto_wallet {
+                        if ui.button("Generate New Wallet").clicked() {
+                            // We have to do all deriving manually for now, libmonero will support generating directly a wallet soon
+                            let mnemonic = generate_seed("en", "original");
+                            let priv_keys = derive_priv_keys(derive_hex_seed(mnemonic.clone()));
+                            let priv_sk = priv_keys[0].to_string();
+                            let priv_vk = priv_keys[1].to_string();
+                            let pub_sk = derive_pub_key(priv_sk);
+                            let pub_vk = derive_pub_key(priv_vk);
+                            let address = libmonero::derive_address(pub_sk, pub_vk, 0);
+                            self.address = address.clone();
+                            self.mnemonic = mnemonic.join(" ");
+                            let mne_str_encoded = mnemonic.join("%20");
+                            let qr_code = QrCode::new(format!(
+                                "monero_wallet:{}?seed={}",
+                                address, mne_str_encoded
+                            ))
+                            .unwrap();
+                            let qr_img = qr_code.render::<Luma<u8>>().build();
+                            let qr_img = DynamicImage::ImageLuma8(qr_img);
+                            let qr_img =
+                                qr_img.resize_exact(350, 350, image::imageops::FilterType::Nearest);
+                            self.qr_main = qr_img;
+                            let qr_addr_code = QrCode::new(format!("{}", address)).unwrap();
+                            let qr_addr_img = qr_addr_code.render::<Luma<u8>>().build();
+                            let qr_addr_img = DynamicImage::ImageLuma8(qr_addr_img);
+                            let qr_addr_img = qr_addr_img.resize_exact(
+                                150,
+                                150,
+                                image::imageops::FilterType::Nearest,
+                            );
+                            self.qr_addr = qr_addr_img;
+                        }
+                    } else {
+                        if ui.button("Update QR Codes").clicked() {
+                            let mne_str_encoded = (self.mnemonic.split(" "))
+                                .map(|x| x.to_string())
+                                .collect::<Vec<String>>()
+                                .join("%20");
+                            let qr_code = QrCode::new(format!(
+                                "monero_wallet:{}?seed={}&height={}",
+                                self.address, mne_str_encoded, self.block_height
+                            ))
+                            .unwrap();
+                            let qr_img = qr_code.render::<Luma<u8>>().build();
+                            let qr_img = DynamicImage::ImageLuma8(qr_img);
+                            let qr_img =
+                                qr_img.resize_exact(350, 350, image::imageops::FilterType::Nearest);
+                            self.qr_main = qr_img;
+                            let qr_addr_code = QrCode::new(format!("{}", self.address)).unwrap();
+                            let qr_addr_img = qr_addr_code.render::<Luma<u8>>().build();
+                            let qr_addr_img = DynamicImage::ImageLuma8(qr_addr_img);
+                            let qr_addr_img = qr_addr_img.resize_exact(
+                                150,
+                                150,
+                                image::imageops::FilterType::Nearest,
+                            );
+                            self.qr_addr = qr_addr_img;
+                        }
                     }
-                } else {
-                    if ui.button("Update QR Codes").clicked() {
-                        let mne_str_encoded = (self.mnemonic.split(" "))
-                            .map(|x| x.to_string())
-                            .collect::<Vec<String>>()
-                            .join("%20");
-                        let qr_code = QrCode::new(format!(
-                            "monero_wallet:{}?seed={}&height={}",
-                            self.address, mne_str_encoded, self.block_height
-                        ))
-                        .unwrap();
-                        let qr_img = qr_code.render::<Luma<u8>>().build();
-                        let qr_img = DynamicImage::ImageLuma8(qr_img);
-                        let qr_img =
-                            qr_img.resize_exact(350, 350, image::imageops::FilterType::Nearest);
-                        self.qr_main = qr_img;
-                        let qr_addr_code = QrCode::new(format!("{}", self.address)).unwrap();
-                        let qr_addr_img = qr_addr_code.render::<Luma<u8>>().build();
-                        let qr_addr_img = DynamicImage::ImageLuma8(qr_addr_img);
-                        let qr_addr_img = qr_addr_img.resize_exact(
-                            150,
-                            150,
-                            image::imageops::FilterType::Nearest,
-                        );
-                        self.qr_addr = qr_addr_img;
+                    if ui.button("Save This Image").clicked() {
+                        let date = chrono::Local::now();
+                        let date = date.format("%H:%M-%d-%m-%Y").to_string();
+                        let files = FileDialog::new()
+                            .add_filter("jpg", &["jpg"])
+                            .set_title("Save Image")
+                            .set_file_name(format!("gem-wallet-{}.jpg", date))
+                            .save_file();
+                        if let Some(file) = files {
+                            self.img.save(file).unwrap();
+                        }
                     }
-                }
+                });
                 ui.add_space(10.0);
                 // draw qr code
                 for (x, y, pixel) in self.qr_main.pixels() {
@@ -622,6 +647,7 @@ impl eframe::App for GemApp {
                     let pixel = Rgba([pixel, pixel, pixel, 255]);
                     img.put_pixel(x + 620, y + 425, pixel);
                 }
+                self.img = img.clone();
                 let color_image = match &img {
                     DynamicImage::ImageRgb8(image) => {
                         // common case optimization
