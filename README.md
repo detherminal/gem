@@ -1,7 +1,7 @@
 # Gem - Gift Easily Monero
 ![Example](./assets/example.jpg)
 
-Gem is a program that generates Monero paper wallets for gifting and tipping. It's name is abbreviation of "Gift Easily Monero".
+Gem is a GUI app that generates Monero paper wallets for gifting and tipping. It's name is abbreviation of "Gift Easily Monero".
 
 # Building
 
