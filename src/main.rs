@@ -130,8 +130,8 @@ fn auto_fill(self_app: &mut GemApp, first: bool) {
         self_app.mnemonic = mnemonic.join(" ");
         let mne_str_encoded = mnemonic.join("%20");
         let qr_code = QrCode::new(format!(
-            "monero_wallet:{}?seed={}",
-            address, mne_str_encoded
+            "monero_wallet:{}?seed={}&height={}",
+            address, mne_str_encoded, self_app.block_height
         ));
         match qr_code {
             Ok(qr_code) => {
@@ -577,8 +577,8 @@ impl eframe::App for GemApp {
                             self.mnemonic = mnemonic.join(" ");
                             let mne_str_encoded = mnemonic.join("%20");
                             let qr_code = QrCode::new(format!(
-                                "monero_wallet:{}?seed={}",
-                                address, mne_str_encoded
+                                "monero_wallet:{}?seed={}&height={}",
+                                address, mne_str_encoded, self.block_height
                             ))
                             .unwrap();
                             let qr_img = qr_code.render::<Luma<u8>>().build();
