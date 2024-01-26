@@ -1,6 +1,6 @@
 [package]
 name = "gem-paper-wallet"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["detherminal"]
 edition = "2021"
 description = "Program to generate Monero paperwallets for gifts"
