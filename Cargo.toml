@@ -15,7 +15,7 @@ categories = ["monero", "paperwallet", "gift"]
 [dependencies]
 eframe = "0.25.0"
 egui = "0.25.0"
-libmonero = "0.1.7"
+libmonero = "0.1.9"
 image = { version = "0.24", default-features = false, features = [
   "png",
   "jpeg",

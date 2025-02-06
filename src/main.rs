@@ -4,12 +4,13 @@ use eframe::egui;
 use image::{io::Reader as ImageReader, DynamicImage};
 use image::{EncodableLayout, GenericImage, GenericImageView, Luma, Rgba};
 use imageproc::drawing::{draw_line_segment_mut, draw_text_mut};
-use libmonero::{derive_hex_seed, derive_priv_keys, derive_pub_key, generate_seed};
+use libmonero::keys::{derive_hex_seed, derive_priv_keys, derive_pub_key, generate_seed};
 use qrcode::QrCode;
 use rfd::FileDialog;
 use rust_embed::RustEmbed;
 use rusttype::{Font, Scale};
 use serde_json::json;
+use core::f32;
 use std::ops::Div;
 
 #[derive(RustEmbed)]
@@ -22,7 +23,7 @@ fn main() -> Result<(), eframe::Error> {
             .with_resizable(false)
             .with_fullscreen(false)
             .with_title("Gem - Gift Easily Monero")
-            .with_inner_size([1100.0, 650.0]),
+            .with_inner_size([1110.0, 700.0]),
         ..Default::default()
     };
     eframe::run_native(
@@ -51,6 +52,7 @@ struct GemApp {
     contact: String,
     booted: bool,
     img: DynamicImage,
+    txids: String,
 }
 
 impl Default for GemApp {
@@ -73,6 +75,7 @@ impl Default for GemApp {
             to: "".to_string(),
             contact: "".to_string(),
             img: DynamicImage::new_rgb8(1, 1),
+            txids: "".to_string(),
         }
     }
 }
@@ -109,9 +112,7 @@ fn auto_fill(self_app: &mut GemApp, first: bool) {
             let price = resp["monero"]["usd"].as_f64().unwrap();
             self_app.value_xmr = price as f32;
         }
-        Err(_) => {
-            return ();
-        }
+        Err(_) => {}
     };
     // Get date
     let date = chrono::Local::now();
@@ -125,7 +126,7 @@ fn auto_fill(self_app: &mut GemApp, first: bool) {
         let priv_vk = priv_keys[1].to_string();
         let pub_sk = derive_pub_key(priv_sk);
         let pub_vk = derive_pub_key(priv_vk);
-        let address = libmonero::derive_address(pub_sk, pub_vk, 0);
+        let address = libmonero::keys::derive_address(pub_sk, pub_vk, 0);
         self_app.address = address.clone();
         self_app.mnemonic = mnemonic.join(" ");
         let mne_str_encoded = mnemonic.join("%20");
@@ -560,6 +561,14 @@ impl eframe::App for GemApp {
                         ui.add(egui::TextEdit::singleline(&mut self.contact).char_limit(60));
                         ui.end_row();
                     });
+                egui::Grid::new("my_grid_2")
+                    .striped(true)
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.heading("TXIDs (Seperate with comma): ");
+                        ui.add(egui::TextEdit::singleline(&mut self.txids).desired_width(f32::INFINITY).char_limit(120));
+                        ui.end_row();
+                    });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     ui.add_space(400.0);
@@ -572,7 +581,7 @@ impl eframe::App for GemApp {
                             let priv_vk = priv_keys[1].to_string();
                             let pub_sk = derive_pub_key(priv_sk);
                             let pub_vk = derive_pub_key(priv_vk);
-                            let address = libmonero::derive_address(pub_sk, pub_vk, 0);
+                            let address = libmonero::keys::derive_address(pub_sk, pub_vk, 0);
                             self.address = address.clone();
                             self.mnemonic = mnemonic.join(" ");
                             let mne_str_encoded = mnemonic.join("%20");
@@ -603,8 +612,8 @@ impl eframe::App for GemApp {
                                 .collect::<Vec<String>>()
                                 .join("%20");
                             let qr_code = QrCode::new(format!(
-                                "monero_wallet:{}?seed={}&height={}",
-                                self.address, mne_str_encoded, self.block_height
+                                "monero_wallet:{}?seed={}&height={}&txids={}",
+                                self.address, mne_str_encoded, self.block_height, self.txids.replace(" ", "")
                             ))
                             .unwrap();
                             let qr_img = qr_code.render::<Luma<u8>>().build();
